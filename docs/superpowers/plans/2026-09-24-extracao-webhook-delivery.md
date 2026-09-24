@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 25, Spring Boot 4.0.7 (`spring-boot-starter-parent`), Spring Data JPA/Hibernate, Flyway, PostgreSQL, `RestClient` sobre JDK `HttpClient`, Lombok (só nas entidades, como no Barrier), JUnit 5, AssertJ, Testcontainers (Postgres 17), ArchUnit 1.5.0, Awaitility. Maven com wrapper. GitHub Actions + GitHub Packages.
 
-**Spec:** `docs/superpowers/specs/2026-09-23-extracao-webhook-delivery-design.md` (este repo). Consumidor final: `C:\Dev\pix-gateway\docs\superpowers\specs\2026-09-23-pix-gateway-design.md` §7.
+**Spec:** `docs/superpowers/specs/2026-09-23-extracao-webhook-delivery-design.md` (este repo). Consumidor final: `C:\Dev\payment-gateway\docs\superpowers\specs\2026-09-23-payment-gateway-design.md` §7.
 
 ## Global Constraints
 
@@ -2224,7 +2224,7 @@ git add -A
 git commit -m "refactor(webhook-api): entrega de webhooks vem da lib webhook-delivery 0.1.0
 
 A maquina de entrega (HMAC, rotacao, tres travas do claim, lease,
-backoff) saiu para com.barrier:webhook-delivery, que o pix-gateway
+backoff) saiu para com.barrier:webhook-delivery, que o payment-gateway
 tambem consome. Aqui ficam Kafka, reconciliacao pelo topico e a API
 administrativa, que chama registerSingle para manter o contrato de
 PUT /v1/webhook-endpoints/{tenantId} intocado. V009 move as tabelas

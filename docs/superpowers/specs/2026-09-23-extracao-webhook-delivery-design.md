@@ -6,8 +6,8 @@ Biblioteca Maven que entrega webhooks assinados a endpoints de clientes, com
 retry, ordenação por chave, idempotência e rotação de segredo. Nasce do
 `services/webhook-api` do Barrier — não é reescrita, é mudança de endereço
 com quatro generalizações. Primeiro consumidor: o Barrier. Segundo, e o que
-justifica a extração: o Pix Gateway
-(`pix-gateway/docs/superpowers/specs/2026-09-23-pix-gateway-design.md`, §7).
+justifica a extração: o Payment Gateway
+(`payment-gateway/docs/superpowers/specs/2026-09-23-payment-gateway-design.md`, §7).
 
 ## 1. Por que biblioteca, em repo próprio, publicada por versão
 
