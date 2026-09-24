@@ -105,7 +105,7 @@ class DeliveryOrderingIntegrationTest {
    */
   private List<Delivery> reivindica() {
     return new org.springframework.transaction.support.TransactionTemplate(txManager)
-        .execute(status -> repository.claimDue(Instant.now(), 10, LEASE));
+        .execute(status -> repository.claimDue(Instant.now(), 10, LEASE, 100));
   }
 
   private void grava(String partitionKey) {
@@ -121,5 +121,105 @@ class DeliveryOrderingIntegrationTest {
         UUID.randomUUID(),
         UUID.randomUUID(),
         partitionKey);
+  }
+
+  /**
+   * Contrato: ordem ESTRITA por chave, e não só "nunca em paralelo". A consulta bloqueava apenas
+   * enquanto a predecessora tinha posse ativa; ao falhar, ela soltava a posse e entrava em
+   * backoff, e a sucessora saía na frente. O receptor via B → A, com a chave que existe para
+   * garantir A → B.
+   */
+  @Test
+  void sucessoraEsperaPredecessoraEmBackoff() {
+    grava("subject-E", "FAILED", "+ interval '10 minute'", "- interval '2 minute'");
+    grava("subject-E", "PENDING", "- interval '1 minute'", "- interval '1 minute'");
+
+    assertThat(reivindica())
+        .as("a sucessora saiu enquanto a predecessora esperava a proxima tentativa — ordem quebrada")
+        .isEmpty();
+  }
+
+  /** Predecessora morta (esgotou as tentativas) libera a sucessora: ordem não vira bloqueio eterno. */
+  @Test
+  void predecessoraMortaLiberaASucessora() {
+    grava("subject-F", "DEAD", "NULL", "- interval '2 minute'");
+    grava("subject-F", "PENDING", "- interval '1 minute'", "- interval '1 minute'");
+
+    assertThat(reivindica()).hasSize(1);
+  }
+
+  /** Com as duas vencidas, sai a mais antiga — e só ela. */
+  @Test
+  void entreDuasVencidasSaiAMaisAntiga() {
+    grava("subject-G", "PENDING", "- interval '1 minute'", "- interval '1 minute'");
+    grava("subject-G", "PENDING", "- interval '3 minute'", "- interval '3 minute'");
+
+    List<Delivery> lote = reivindica();
+    assertThat(lote).hasSize(1);
+    assertThat(jdbc.queryForObject(
+            "SELECT created_at < now() - interval '2 minute' FROM webhook_delivery.deliveries WHERE id = ?",
+            Boolean.class, lote.getFirst().id()))
+        .isTrue();
+  }
+
+  private void grava(String partitionKey, String status, String nextAttemptOffset, String createdOffset) {
+    String nextAttempt = "NULL".equals(nextAttemptOffset) ? "NULL" : "now() " + nextAttemptOffset;
+    jdbc.update(
+        """
+        INSERT INTO webhook_delivery.deliveries
+               (id, event_id, endpoint_id, event_type, aggregate_id, tenant_id, target_url, payload,
+                status, attempts, next_attempt_at, created_at, partition_key)
+        VALUES (?, ?, ?, 'assessment.completed', 'a-1', 'default', 'http://localhost:9000', '{}',
+                ?, 0, %s, now() %s, ?)
+        """.formatted(nextAttempt, createdOffset),
+        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), status, partitionKey);
+  }
+
+  /**
+   * Vizinho barulhento: um endpoint fora do ar, com dezenas de entregas em retry, ocupava todos os
+   * workers e os outros tenants esperavam. O cap limita quantas entregas do MESMO endpoint ficam
+   * em voo — no lote (filtro em memória) e entre ciclos/réplicas (posse ativa no banco).
+   */
+  @Test
+  void capPorEndpointLimitaOLoteDoMesmoEndpoint() {
+    UUID barulhento = UUID.randomUUID();
+    for (int i = 0; i < 6; i++) gravaParaEndpoint(barulhento);
+    UUID quieto = UUID.randomUUID();
+    gravaParaEndpoint(quieto);
+
+    List<Delivery> lote = reivindicaComCap(4);
+
+    assertThat(lote.stream().filter(d -> d.endpointId().equals(barulhento))).hasSize(4);
+    assertThat(lote.stream().filter(d -> d.endpointId().equals(quieto))).hasSize(1);
+  }
+
+  @Test
+  void capPorEndpointContaAsQueJaEstaoEmVoo() {
+    UUID barulhento = UUID.randomUUID();
+    for (int i = 0; i < 6; i++) gravaParaEndpoint(barulhento);
+    assertThat(reivindicaComCap(4)).hasSize(4);
+
+    assertThat(reivindicaComCap(4))
+        .as("com 4 em voo no banco, o ciclo seguinte nao deveria pegar mais desse endpoint")
+        .isEmpty();
+    jdbc.update("UPDATE webhook_delivery.deliveries SET status = 'DELIVERED', claimed_at = NULL WHERE claimed_at IS NOT NULL");
+    assertThat(reivindicaComCap(4)).hasSize(2);
+  }
+
+  private List<Delivery> reivindicaComCap(int maxPerEndpoint) {
+    return new org.springframework.transaction.support.TransactionTemplate(txManager)
+        .execute(status -> repository.claimDue(Instant.now(), 10, LEASE, maxPerEndpoint));
+  }
+
+  private void gravaParaEndpoint(UUID endpointId) {
+    jdbc.update(
+        """
+        INSERT INTO webhook_delivery.deliveries
+               (id, event_id, endpoint_id, event_type, aggregate_id, tenant_id, target_url, payload,
+                status, attempts, next_attempt_at, created_at)
+        VALUES (?, ?, ?, 'x.y', 'a-1', 'default', 'http://localhost:9000', '{}',
+                'PENDING', 0, now() - interval '1 minute', now())
+        """,
+        UUID.randomUUID(), UUID.randomUUID(), endpointId);
   }
 }

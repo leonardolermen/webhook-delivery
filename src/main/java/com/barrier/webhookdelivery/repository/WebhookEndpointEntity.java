@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.List;
 import lombok.AccessLevel;
@@ -61,5 +62,14 @@ class WebhookEndpointEntity {
 
   @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
+
+  /**
+   * Controle otimista: o {@code save} copia todos os campos sobre a entidade lida; sem isto uma
+   * gravação baseada em leitura antiga desfazia rotação de segredo ou desativação, em silêncio.
+   * Gerido pelo Hibernate — o domínio não o conhece.
+   */
+  @Version
+  @Column(name = "version", nullable = false)
+  private long version;
 
 }

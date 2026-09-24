@@ -9,6 +9,14 @@ import java.util.UUID;
  */
 public class Delivery {
 
+  /**
+   * Tamanho da coluna {@code last_error}. O detalhe de uma falha vem de fora (mensagem de
+   * exceção com a URL inteira, corpo de erro do parceiro) e não tem limite; gravá-lo inteiro
+   * estourava a coluna, o save falhava e contador, backoff e transição para DEAD se perdiam — a
+   * entrega voltava do lease com o contador antigo, para sempre.
+   */
+  public static final int MAX_ERROR_LENGTH = 500;
+
   private final UUID id;
   private final UUID eventId;
   private final UUID endpointId;
@@ -19,7 +27,9 @@ public class Delivery {
   private final String payload;
 
   /**
-   * Chave de ordenação da entrega: duas entregas com a mesma chave nunca saem em paralelo.
+   * Chave de ordenação da entrega: ordem <b>estrita</b> por chave. Uma entrega só sai depois que
+   * todas as mais antigas da mesma chave chegaram a estado terminal (DELIVERED ou DEAD) —
+   * inclusive enquanto uma predecessora espera o backoff de uma falha.
    *
    * <p>No Barrier é o subject, no gateway é o payment — nunca o tenant (serializaria o parceiro
    * grande) nem o assessment (a decisão e a mudança de nível do mesmo cliente têm assessments
@@ -33,6 +43,14 @@ public class Delivery {
   private String lastError;
   private Instant nextAttemptAt;
   private Instant claimedAt;
+
+  /**
+   * Token de posse da tentativa em curso. Nasce na reivindicação e é a credencial para gravar o
+   * desfecho: o repositório só aceita o resultado de quem apresenta o token vigente. Um worker
+   * cujo lease venceu (e cuja entrega outro reivindicou) ainda carrega o token antigo, e a
+   * gravação dele é recusada em vez de sobrescrever o resultado mais novo.
+   */
+  private UUID claimToken;
   private final Instant createdAt;
   private Instant deliveredAt;
 
@@ -112,6 +130,7 @@ public class Delivery {
       String lastError,
       Instant nextAttemptAt,
       Instant claimedAt,
+      UUID claimToken,
       Instant createdAt,
       Instant deliveredAt) {
     Delivery d =
@@ -131,8 +150,15 @@ public class Delivery {
     d.lastError = lastError;
     d.nextAttemptAt = nextAttemptAt;
     d.claimedAt = claimedAt;
+    d.claimToken = claimToken;
     d.deliveredAt = deliveredAt;
     return d;
+  }
+
+  /** Toma posse para uma tentativa. Chamado pelo repositório, dentro da transação de reivindicação. */
+  public void claim(Instant now, UUID token) {
+    this.claimedAt = now;
+    this.claimToken = token;
   }
 
   /** Marca como entregue com sucesso. */
@@ -154,7 +180,7 @@ public class Delivery {
    */
   public void markFailed(String error, int maxAttempts, Instant nextAttemptAt) {
     this.attempts++;
-    this.lastError = error;
+    this.lastError = truncate(error);
     this.claimedAt = null;
     if (this.attempts >= maxAttempts) {
       this.status = DeliveryStatus.DEAD;
@@ -172,9 +198,13 @@ public class Delivery {
    */
   public void markDead(String error) {
     this.status = DeliveryStatus.DEAD;
-    this.lastError = error;
+    this.lastError = truncate(error);
     this.claimedAt = null;
     this.nextAttemptAt = null;
+  }
+
+  private static String truncate(String error) {
+    return error == null || error.length() <= MAX_ERROR_LENGTH ? error : error.substring(0, MAX_ERROR_LENGTH);
   }
 
   public UUID id() {
@@ -231,6 +261,10 @@ public class Delivery {
 
   public Instant claimedAt() {
     return claimedAt;
+  }
+
+  public UUID claimToken() {
+    return claimToken;
   }
 
   public Instant createdAt() {

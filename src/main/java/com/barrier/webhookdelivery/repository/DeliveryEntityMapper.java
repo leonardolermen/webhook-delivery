@@ -22,6 +22,7 @@ final class DeliveryEntityMapper {
     e.setLastError(d.lastError());
     e.setNextAttemptAt(d.nextAttemptAt());
     e.setClaimedAt(d.claimedAt());
+    e.setClaimToken(d.claimToken());
     e.setCreatedAt(d.createdAt());
     e.setDeliveredAt(d.deliveredAt());
     return e;
@@ -43,6 +44,7 @@ final class DeliveryEntityMapper {
         e.getLastError(),
         e.getNextAttemptAt(),
         e.getClaimedAt(),
+        e.getClaimToken(),
         e.getCreatedAt(),
         e.getDeliveredAt());
   }

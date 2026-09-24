@@ -6,7 +6,9 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -38,9 +40,26 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
     this.jpa = jpa;
   }
 
+  /**
+   * {@code @Transactional} (REQUIRED) porque o UPDATE em JPQL exige transação; quem chama (o
+   * worker, fora da transação de reivindicação) não tem uma, e ela é curta: um UPDATE.
+   */
   @Override
-  public Delivery save(Delivery delivery) {
-    return DeliveryEntityMapper.toDomain(jpa.save(DeliveryEntityMapper.toEntity(delivery)));
+  @Transactional
+  public boolean saveOutcome(Delivery delivery) {
+    if (delivery.claimToken() == null) {
+      throw new IllegalArgumentException("entrega sem token de posse: o desfecho só pode vir de quem reivindicou");
+    }
+    int afetadas =
+        jpa.gravarDesfecho(
+            delivery.id(),
+            delivery.claimToken(),
+            delivery.status(),
+            delivery.attempts(),
+            delivery.lastError(),
+            delivery.nextAttemptAt(),
+            delivery.deliveredAt());
+    return afetadas == 1;
   }
 
   /**
@@ -66,12 +85,12 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
                 """
                 INSERT INTO webhook_delivery.deliveries
                   (id, event_id, endpoint_id, event_type, aggregate_id, tenant_id, target_url, payload,
-                   partition_key, status, attempts, last_error, next_attempt_at, claimed_at, created_at,
-                   delivered_at)
+                   partition_key, status, attempts, last_error, next_attempt_at, claimed_at, claim_token,
+                   created_at, delivered_at)
                 VALUES
                   (:id, :eventId, :endpointId, :eventType, :aggregateId, :tenantId, :targetUrl, :payload,
-                   :partitionKey, :status, :attempts, :lastError, :nextAttemptAt, :claimedAt, :createdAt,
-                   :deliveredAt)
+                   :partitionKey, :status, :attempts, :lastError, :nextAttemptAt, :claimedAt, :claimToken,
+                   :createdAt, :deliveredAt)
                 ON CONFLICT (event_id, endpoint_id) DO NOTHING
                 """)
             .setParameter("id", e.getId())
@@ -88,6 +107,7 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
             .setParameter("lastError", e.getLastError())
             .setParameter("nextAttemptAt", e.getNextAttemptAt())
             .setParameter("claimedAt", e.getClaimedAt())
+            .setParameter("claimToken", e.getClaimToken())
             .setParameter("createdAt", e.getCreatedAt())
             .setParameter("deliveredAt", e.getDeliveredAt())
             .executeUpdate();
@@ -115,7 +135,7 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
    * mesma chave. Tirar qualquer uma reabre um caso que os testes das outras duas não pegam.
    */
   @Override
-  public List<Delivery> claimDue(Instant now, int limit, Duration lease) {
+  public List<Delivery> claimDue(Instant now, int limit, Duration lease, int maxPerEndpoint) {
     // Sem transação, pg_try_advisory_xact_lock auto-commita e o lock morre no mesmo instante em que
     // nasce: a proteção some sem nenhum sinal, que é o modo de falha que esta frente inteira existe
     // para eliminar. Melhor recusar alto do que reivindicar achando que está protegido.
@@ -134,18 +154,29 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
             List.of(DeliveryStatus.PENDING, DeliveryStatus.FAILED),
             now,
             now.minus(lease),
+            maxPerEndpoint,
             Limit.of(limit));
     // SEGUNDA trava, e ela é indispensável: a query exclui chaves JÁ em voo, mas duas entregas
     // recém-criadas do mesmo subject ainda não têm claimedAt — nenhuma bloqueia a outra, e as duas
     // seriam elegíveis no mesmo lote. Sem esta linha a ordem quebraria dentro de um único ciclo,
     // que é justamente o caso mais comum: os dois eventos do mesmo cliente chegam juntos.
     Set<String> chavesNoLote = new HashSet<>();
+    // Mesmo raciocínio para o cap por endpoint: a consulta contou as posses JÁ gravadas; as deste
+    // lote ainda não existem no banco, então o teto dentro do lote é aplicado aqui.
+    Map<UUID, Integer> porEndpointNoLote = new HashMap<>();
     List<DeliveryEntity> lote =
         claimable.stream()
             .filter(e -> e.getPartitionKey() == null || chavesNoLote.add(e.getPartitionKey()))
+            .filter(e -> porEndpointNoLote.merge(e.getEndpointId(), 1, Integer::sum) <= maxPerEndpoint)
             .toList();
 
-    lote.forEach(entity -> entity.setClaimedAt(now));
+    // Posse = instante (para o lease) + token (para o desfecho): o token é o que impede um worker
+    // com lease vencido de gravar por cima de quem reivindicou depois dele.
+    lote.forEach(
+        entity -> {
+          entity.setClaimedAt(now);
+          entity.setClaimToken(UUID.randomUUID());
+        });
     return lote.stream().map(DeliveryEntityMapper::toDomain).toList();
   }
 }

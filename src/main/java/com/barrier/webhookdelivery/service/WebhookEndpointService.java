@@ -2,6 +2,7 @@ package com.barrier.webhookdelivery.service;
 
 import com.barrier.webhookdelivery.config.WebhookDeliveryProperties;
 import com.barrier.webhookdelivery.domain.SigningMaterial;
+import com.barrier.webhookdelivery.domain.TargetUrlPolicy;
 import com.barrier.webhookdelivery.domain.WebhookEndpoint;
 import com.barrier.webhookdelivery.repository.WebhookEndpointRepository;
 import java.time.Duration;
@@ -19,14 +20,17 @@ public class WebhookEndpointService {
 
   private final WebhookEndpointRepository repository;
   private final Duration rotationOverlap;
+  private final TargetUrlPolicy targetPolicy;
 
   public WebhookEndpointService(WebhookEndpointRepository repository, WebhookDeliveryProperties properties) {
     this.repository = repository;
     this.rotationOverlap = properties.secretRotationOverlap();
+    this.targetPolicy = new TargetUrlPolicy(properties.allowPrivateTargets());
   }
 
   @Transactional
   public WebhookEndpoint register(String tenantId, String targetUrl, List<String> events) {
+    targetPolicy.check(targetUrl);
     WebhookEndpoint salvo = repository.save(WebhookEndpoint.register(tenantId, targetUrl, events));
     log.info("Endpoint {} do tenant {} registrado (eventos {})", salvo.id(), tenantId, salvo.events());
     return salvo;
@@ -39,6 +43,10 @@ public class WebhookEndpointService {
    */
   @Transactional
   public WebhookEndpoint registerSingle(String tenantId, String targetUrl) {
+    // Atômico por tenant: sem isto, duas chamadas simultâneas liam "vazio" e inseriam dois
+    // endpoints "únicos", e o mesmo evento saía para os dois.
+    targetPolicy.check(targetUrl);
+    repository.lockTenant(tenantId);
     List<WebhookEndpoint> existentes = repository.findByTenantId(tenantId);
     if (existentes.isEmpty()) {
       return register(tenantId, targetUrl, WebhookEndpoint.ALL_EVENTS);
@@ -50,6 +58,7 @@ public class WebhookEndpointService {
 
   @Transactional
   public Optional<WebhookEndpoint> update(UUID id, String targetUrl, List<String> events) {
+    targetPolicy.check(targetUrl);
     return repository.findById(id).map(e -> e.withTargetUrl(targetUrl).withEvents(events)).map(repository::save);
   }
 

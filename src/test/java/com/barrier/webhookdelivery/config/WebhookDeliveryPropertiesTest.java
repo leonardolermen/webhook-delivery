@@ -10,14 +10,16 @@ class WebhookDeliveryPropertiesTest {
   @Test
   void defaultsSaoOsDoBarrier() {
     WebhookDeliveryProperties p =
-        new WebhookDeliveryProperties(0, null, 0, 0, null, null, null, null, null, null, null, null);
-    assertThat(p.workers()).isEqualTo(3);
+        new WebhookDeliveryProperties(0, null, 0, 0, null, null, null, false, 0, null, null, null, null, null);
+    assertThat(p.workers()).as("threads virtuais: o custo real e o pool de conexoes, usado por milissegundos por tentativa").isEqualTo(16);
     assertThat(p.lease()).isEqualTo(Duration.ofMinutes(2));
     assertThat(p.retryDelayMs()).isEqualTo(5000);
     assertThat(p.maxAttempts()).isEqualTo(5);
     assertThat(p.baseBackoff()).isEqualTo(Duration.ofSeconds(30));
     assertThat(p.connectTimeout()).isEqualTo(Duration.ofSeconds(2));
     assertThat(p.readTimeout()).isEqualTo(Duration.ofSeconds(10));
+    assertThat(p.maxInFlightPerEndpoint()).as("um parceiro fora do ar nao pode ocupar todos os workers").isEqualTo(4);
+    assertThat(p.allowPrivateTargets()).as("producao recusa rede interna por padrao").isFalse();
     assertThat(p.secretRotationOverlap()).isEqualTo(Duration.ofHours(24));
     assertThat(p.headers().prefix()).isEqualTo("X-Webhook");
     assertThat(p.correlationMdcKey()).isEqualTo("correlationId");
