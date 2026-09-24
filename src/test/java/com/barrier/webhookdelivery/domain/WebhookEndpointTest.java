@@ -48,4 +48,21 @@ class WebhookEndpointTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("sem TLS");
   }
+
+  @Test
+  void toStringNaoExpoeOsSegredos() {
+    WebhookEndpoint e = WebhookEndpoint.register("t1", "https://acme/webhook", List.of()).rotateSecret(Duration.ofHours(1));
+    assertThat(e.previousSecret()).isNotBlank();
+    assertThat(e.toString())
+        .doesNotContain(e.secret())
+        .doesNotContain(e.previousSecret())
+        .contains("secret=***", "previousSecret=***", "tenantId=t1");
+  }
+
+  @Test
+  void eventsComNullRecusaComIllegalArgument() {
+    assertThatThrownBy(() -> WebhookEndpoint.register("t1", "https://acme/webhook", java.util.Arrays.asList("a.*", null)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("events não pode conter null");
+  }
 }

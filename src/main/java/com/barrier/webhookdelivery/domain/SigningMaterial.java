@@ -17,4 +17,11 @@ public record SigningMaterial(String secret, String previousSecret) {
   public boolean hasPrevious() {
     return previousSecret != null && !previousSecret.isBlank();
   }
+
+  /** Mascarado pelo mesmo motivo de {@link WebhookEndpoint#toString()}: segredo em log é segredo vazado. */
+  @Override
+  public String toString() {
+    return "SigningMaterial[secret=" + WebhookEndpoint.mascara(secret)
+        + ", previousSecret=" + WebhookEndpoint.mascara(previousSecret) + "]";
+  }
 }

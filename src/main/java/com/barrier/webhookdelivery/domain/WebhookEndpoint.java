@@ -70,7 +70,30 @@ public record WebhookEndpoint(
     if (events == null || events.isEmpty()) {
       return ALL_EVENTS;
     }
+    // Checado antes do List.copyOf, que recusaria com NullPointerException: é entrada inválida de
+    // quem registra, e o contrato do resto da validação é IllegalArgumentException. Stream e não
+    // contains(null): em List.of(...) o próprio contains(null) lança NullPointerException.
+    if (events.stream().anyMatch(java.util.Objects::isNull)) {
+      throw new IllegalArgumentException("events não pode conter null");
+    }
     return List.copyOf(events);
+  }
+
+  /**
+   * Mascara os segredos: o {@code toString()} gerado do record os imprimiria em claro em qualquer
+   * log ou mensagem de exceção que carregue o endpoint — e com o segredo, qualquer um que leia o
+   * log forja callbacks daquele tenant.
+   */
+  @Override
+  public String toString() {
+    return "WebhookEndpoint[id=" + id + ", tenantId=" + tenantId + ", targetUrl=" + targetUrl
+        + ", secret=" + mascara(secret) + ", previousSecret=" + mascara(previousSecret)
+        + ", previousSecretUntil=" + previousSecretUntil + ", events=" + events + ", active=" + active
+        + ", createdAt=" + createdAt + ", updatedAt=" + updatedAt + "]";
+  }
+
+  static String mascara(String segredo) {
+    return segredo == null ? "null" : "***";
   }
 
   /**
