@@ -24,19 +24,10 @@ public final class Correlation {
    * Executa com o id de correlação no MDC e restaura o estado anterior ao final.
    */
   public static void run(String mdcKey, String correlationId, Runnable action) {
-    String previous = MDC.get(mdcKey);
-    if (correlationId != null && !correlationId.isBlank()) {
-      MDC.put(mdcKey, correlationId);
-    }
-    try {
+    call(mdcKey, correlationId, () -> {
       action.run();
-    } finally {
-      if (previous == null) {
-        MDC.remove(mdcKey);
-      } else {
-        MDC.put(mdcKey, previous);
-      }
-    }
+      return null;
+    });
   }
 
   /**
