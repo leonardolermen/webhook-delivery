@@ -8,6 +8,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * tem a conta no {@code application.yml} de lá (pool de conexões vs. workers, lease maior que o pior
  * caso de connect+read timeout).
  *
+ * <p>{@code maxInFlightPerEndpoint} (padrão 4) é o teto de entregas simultâneas de um MESMO
+ * endpoint: um parceiro fora do ar, com dezenas de entregas em retry, não ocupa todos os workers.
+ *
+ * <p>{@code allowPrivateTargets} (padrão {@code false}) desliga a política de destino que recusa
+ * rede interna (SSRF) — só para desenvolvimento, com callback em {@code localhost}. Ver
+ * {@code TargetUrlPolicy}.
+ *
  * <p>Não há mais {@code target-url} nem {@code secret} globais: eram fallback de desenvolvimento e,
  * com dois tenants, entregavam o callback de um no endpoint do outro. Quem quiser um destino de dev
  * registra um endpoint na subida.
@@ -21,6 +28,8 @@ public record WebhookDeliveryProperties(
     Duration baseBackoff,
     Duration connectTimeout,
     Duration readTimeout,
+    boolean allowPrivateTargets,
+    int maxInFlightPerEndpoint,
     Duration secretRotationOverlap,
     Headers headers,
     String correlationMdcKey,
@@ -28,7 +37,8 @@ public record WebhookDeliveryProperties(
     Flyway flyway) {
 
   public WebhookDeliveryProperties {
-    if (workers <= 0) workers = 3;
+    if (workers <= 0) workers = 16;
+    if (maxInFlightPerEndpoint <= 0) maxInFlightPerEndpoint = 4;
     if (lease == null) lease = Duration.ofMinutes(2);
     if (retryDelayMs <= 0) retryDelayMs = 5000;
     if (maxAttempts <= 0) maxAttempts = 5;

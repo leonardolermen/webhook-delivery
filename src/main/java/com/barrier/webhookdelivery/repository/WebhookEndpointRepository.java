@@ -13,4 +13,11 @@ public interface WebhookEndpointRepository {
   List<WebhookEndpoint> findByTenantId(String tenantId);
   List<WebhookEndpoint> findActiveByTenantId(String tenantId);
   List<WebhookEndpoint> findAll();
+
+  /**
+   * Trava o tenant até o fim da transação corrente, para operações "lê e decide se insere" (o
+   * endpoint único do {@code registerSingle}). Sem transação ativa, recusa: o lock morreria no
+   * auto-commit e a proteção sumiria em silêncio.
+   */
+  void lockTenant(String tenantId);
 }

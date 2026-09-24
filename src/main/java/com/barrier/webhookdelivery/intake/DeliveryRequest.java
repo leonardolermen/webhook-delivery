@@ -10,7 +10,8 @@ import java.util.UUID;
  * @param eventType nome canônico ({@code payment.completed}); é o que os endpoints filtram
  * @param eventId idempotência: o mesmo evento nunca gera duas entregas para o mesmo endpoint
  * @param aggregateId id do agregado de origem, só para rastreio; a lib não interpreta
- * @param partitionKey chave de ordenação; entregas com a mesma chave nunca correm em paralelo.
+ * @param partitionKey chave de ordenação estrita: uma entrega só sai depois que as mais antigas da
+ *     mesma chave chegaram a estado terminal (entregue ou morta), backoff incluído.
  *     {@code null} = sem ordem exigida — fail-open, o desconhecido não trava a fila
  * @param payload corpo exato que será assinado e entregue; a lib não o altera nem normaliza
  * @param correlationId id da requisição de origem, para o log; pode ser {@code null}

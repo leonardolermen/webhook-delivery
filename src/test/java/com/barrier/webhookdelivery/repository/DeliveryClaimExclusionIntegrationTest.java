@@ -79,7 +79,7 @@ class DeliveryClaimExclusionIntegrationTest {
               () ->
                   tx().execute(
                           status -> {
-                            List<Delivery> lote = repository.claimDue(Instant.now(), 10, LEASE);
+                            List<Delivery> lote = repository.claimDue(Instant.now(), 10, LEASE, 100);
                             aReivindicou.countDown();
                             // Segura a transação ABERTA: é este intervalo — claim feito, commit
                             // pendente — que a outra réplica enxergava como "chave livre".
@@ -92,7 +92,7 @@ class DeliveryClaimExclusionIntegrationTest {
       // o pod A fez o SELECT, então nenhum FOR UPDATE a alcançou.
       grava("subject-X");
 
-      List<Delivery> loteB = tx().execute(status -> repository.claimDue(Instant.now(), 10, LEASE));
+      List<Delivery> loteB = tx().execute(status -> repository.claimDue(Instant.now(), 10, LEASE, 100));
       bTerminou.countDown();
 
       List<Delivery> loteA = futuroA.get(10, TimeUnit.SECONDS);
@@ -127,14 +127,14 @@ class DeliveryClaimExclusionIntegrationTest {
               () ->
                   tx().execute(
                           status -> {
-                            List<Delivery> lote = repository.claimDue(Instant.now(), 10, LEASE);
+                            List<Delivery> lote = repository.claimDue(Instant.now(), 10, LEASE, 100);
                             aReivindicou.countDown();
                             aguarda(bTerminou);
                             return lote;
                           }));
 
       assertThat(aReivindicou.await(10, TimeUnit.SECONDS)).isTrue();
-      List<Delivery> loteB = tx().execute(status -> repository.claimDue(Instant.now(), 10, LEASE));
+      List<Delivery> loteB = tx().execute(status -> repository.claimDue(Instant.now(), 10, LEASE, 100));
       bTerminou.countDown();
 
       assertThat(futuroA.get(10, TimeUnit.SECONDS)).hasSize(1);
@@ -157,7 +157,7 @@ class DeliveryClaimExclusionIntegrationTest {
    */
   @Test
   void recusaReivindicarForaDeTransacao() {
-    assertThatThrownBy(() -> repository.claimDue(Instant.now(), 10, LEASE))
+    assertThatThrownBy(() -> repository.claimDue(Instant.now(), 10, LEASE, 100))
         .isInstanceOf(InvalidDataAccessApiUsageException.class)
         .hasRootCauseInstanceOf(IllegalStateException.class)
         .hasMessageContaining("precisa rodar dentro de uma transação");
@@ -188,7 +188,7 @@ class DeliveryClaimExclusionIntegrationTest {
   }
 
   private List<Delivery> reivindica() {
-    return tx().execute(status -> repository.claimDue(Instant.now(), 10, LEASE));
+    return tx().execute(status -> repository.claimDue(Instant.now(), 10, LEASE, 100));
   }
 
   private void grava(String partitionKey) {

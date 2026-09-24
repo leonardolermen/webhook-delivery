@@ -1,6 +1,7 @@
 package com.barrier.webhookdelivery.client;
 
 import com.barrier.webhookdelivery.config.WebhookDeliveryProperties;
+import com.barrier.webhookdelivery.domain.TargetUrlPolicy;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.http.MediaType;
@@ -19,11 +20,13 @@ public class HttpWebhookClient implements WebhookClient {
 
   private final RestClient restClient;
   private final WebhookDeliveryProperties.Headers headers;
+  private final TargetUrlPolicy targetPolicy;
 
   public HttpWebhookClient(WebhookDeliveryProperties properties) {
     Duration connectTimeout = properties.connectTimeout();
     Duration readTimeout = properties.readTimeout();
     this.headers = properties.headers();
+    this.targetPolicy = new TargetUrlPolicy(properties.allowPrivateTargets());
 
     // Connect timeout vive no HttpClient da JDK, não no request factory.
     HttpClient httpClient = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
@@ -35,6 +38,9 @@ public class HttpWebhookClient implements WebhookClient {
   @Override
   public WebhookSendResult send(WebhookRequest request) {
     try {
+      // De novo aqui, e não só no registro: a URL da entrega foi validada quando o endpoint foi
+      // registrado, e o DNS do parceiro pode ter passado a apontar para dentro desde então.
+      targetPolicy.check(request.url());
       var spec =
           restClient
               .post()

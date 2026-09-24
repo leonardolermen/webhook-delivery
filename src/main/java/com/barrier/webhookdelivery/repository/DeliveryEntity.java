@@ -68,6 +68,10 @@ class DeliveryEntity {
   @Column(name = "claimed_at")
   private Instant claimedAt;
 
+  /** Credencial da posse; ver {@code Delivery#claimToken}. NULL quando ninguém tem a entrega. */
+  @Column(name = "claim_token")
+  private java.util.UUID claimToken;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 

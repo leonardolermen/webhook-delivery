@@ -35,6 +35,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  */
 @SpringBootTest(classes = com.barrier.webhookdelivery.testapp.TestApplication.class, properties = {
     "webhook-delivery.retry-delay-ms=200",
+    "webhook-delivery.allow-private-targets=true",
     "webhook-delivery.headers.prefix=X-Test"
 })
 @Testcontainers

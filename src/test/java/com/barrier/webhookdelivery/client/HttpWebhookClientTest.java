@@ -35,8 +35,12 @@ class HttpWebhookClientTest {
   static void desce() { server.stop(0); }
 
   private static HttpWebhookClient cliente() {
+    return cliente(true);
+  }
+
+  private static HttpWebhookClient cliente(boolean allowPrivateTargets) {
     return new HttpWebhookClient(new WebhookDeliveryProperties(
-        0, null, 0, 0, null, Duration.ofSeconds(1), Duration.ofSeconds(1), null,
+        0, null, 0, 0, null, Duration.ofSeconds(1), Duration.ofSeconds(1), allowPrivateTargets, 0, null,
         new WebhookDeliveryProperties.Headers("X-Gateway"), null, null, null));
   }
 
@@ -66,5 +70,20 @@ class HttpWebhookClientTest {
     WebhookSendResult r = cliente().send(new WebhookRequest("http://localhost:1/hook", "{}", "evt-3", "x", "s", null));
     assertThat(r.success()).isFalse();
     assertThat(r.statusCode()).isZero();
+  }
+
+  /**
+   * A política de destino vale também na hora do POST, não só no registro: entre um e outro o DNS
+   * do parceiro pode passar a apontar para dentro (rebinding), e a URL gravada na entrega já
+   * passou pela validação de registro há muito tempo.
+   */
+  @Test
+  void modoEstritoRecusaDestinoInternoAntesDeConectar() {
+    headers.clear();
+    WebhookSendResult r = cliente(false).send(new WebhookRequest(url(), "{}", "evt-4", "x", "s", null));
+    assertThat(r.success()).isFalse();
+    assertThat(r.statusCode()).isZero();
+    assertThat(r.detail()).contains("rede interna");
+    assertThat(headers).as("o POST nao deveria ter chegado ao servidor").isEmpty();
   }
 }

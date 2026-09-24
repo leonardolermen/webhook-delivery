@@ -15,6 +15,7 @@ import com.barrier.webhookdelivery.observability.Correlation;
 import com.barrier.webhookdelivery.repository.DeliveryRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -110,20 +111,35 @@ public class WebhookDeliveryService implements DeliveryIntake, AutoCloseable {
    * Kafka por entregas recém-criadas (ver migration V003).
    */
   public int retryDue() {
-    List<Delivery> due =
-        transactionTemplate.execute(
-            status -> repository.claimDue(Instant.now(), RETRY_BATCH, lease));
-    if (due == null || due.isEmpty()) {
-      return 0;
+    int tentadas = 0;
+    List<CompletableFuture<Void>> emVoo = new ArrayList<>();
+    while (tentadas < RETRY_BATCH) {
+      // Reposição contínua: espera UMA permissão livre (um worker terminou), pega as demais que
+      // estiverem livres e reivindica só isso. Um parceiro em timeout segura o worker dele, não os
+      // outros — antes o ciclo esperava o sublote inteiro, e os slots livres ficavam ociosos até o
+      // mais lento responder. E cada entrega começa assim que é reivindicada: o lease só precisa
+      // cobrir UMA tentativa, não 100/workers rodadas.
+      permissoes.acquireUninterruptibly();
+      int capacidade = Math.min(1 + permissoes.drainPermits(), RETRY_BATCH - tentadas);
+      List<Delivery> due =
+          transactionTemplate.execute(
+              status -> repository.claimDue(Instant.now(), capacidade, lease, properties.maxInFlightPerEndpoint()));
+      int reivindicadas = due == null ? 0 : due.size();
+      // Permissões que sobraram (nada vencido, ou menos que a capacidade) voltam ao semáforo.
+      permissoes.release(capacidade - reivindicadas);
+      if (reivindicadas == 0) {
+        break;
+      }
+      for (Delivery d : due) {
+        // A permissão já foi adquirida acima, em nome desta tarefa; ela devolve ao terminar.
+        emVoo.add(CompletableFuture.runAsync(() -> comPermissaoJaAdquirida(() -> attempt(d)), entregas));
+      }
+      tentadas += reivindicadas;
     }
-    var tarefas =
-        due.stream()
-            .map(d -> CompletableFuture.runAsync(() -> comPermissao(() -> attempt(d)), entregas))
-            .toList();
-    // Espera o lote: sem isto o ciclo seguinte reivindicaria com o anterior ainda em voo, e a
-    // concorrência real deixaria de ser a que o teto declara.
-    CompletableFuture.allOf(tarefas.toArray(CompletableFuture[]::new)).join();
-    return due.size();
+    // Espera o que ainda está em voo: o scheduler é fixedDelay e o ciclo seguinte reivindicaria
+    // com estas ainda em andamento — a concorrência real deixaria de ser a que o teto declara.
+    CompletableFuture.allOf(emVoo.toArray(CompletableFuture[]::new)).join();
+    return tentadas;
   }
 
   /**
@@ -133,9 +149,11 @@ public class WebhookDeliveryService implements DeliveryIntake, AutoCloseable {
    * <p>Virtual thread não cria conexão de banco nem paciência no destino: sem este limite, o lote
    * inteiro (100) sairia de uma vez sobre um pool de 5 conexões. <b>O limite é a feature</b> —
    * {@code newVirtualThreadPerTaskExecutor()} sozinho não tem nenhum.
+   *
+   * <p>A aquisição fica em {@link #retryDue()}, na thread do ciclo, porque é ela que precisa saber
+   * quantas permissões há para dimensionar a reivindicação; a tarefa só devolve.
    */
-  private void comPermissao(Runnable tarefa) {
-    permissoes.acquireUninterruptibly();
+  private void comPermissaoJaAdquirida(Runnable tarefa) {
     try {
       tarefa.run();
     } finally {
@@ -149,7 +167,7 @@ public class WebhookDeliveryService implements DeliveryIntake, AutoCloseable {
     Optional<SigningMaterial> material = endpoints.resolveSigningMaterial(delivery.endpointId());
     if (material.isEmpty()) {
       delivery.markDead("endpoint desativado ou removido");
-      repository.save(delivery);
+      gravarDesfecho(delivery);
       log.warn("Entrega {} encerrada: endpoint {} não está mais ativo", delivery.id(), delivery.endpointId());
       return;
     }
@@ -182,7 +200,21 @@ public class WebhookDeliveryService implements DeliveryIntake, AutoCloseable {
           delivery.attempts() + 1,
           result.detail());
     }
-    repository.save(delivery);
+    gravarDesfecho(delivery);
+  }
+
+  /**
+   * O desfecho só vale se a posse ainda é desta tentativa. Quando não é, o lease venceu no meio
+   * do POST e outra réplica já reivindicou: o resultado dela é o que fica, e este é descartado
+   * com aviso — gravar por cima reabriria a duplicata que o lease existe para evitar.
+   */
+  private void gravarDesfecho(Delivery delivery) {
+    if (!repository.saveOutcome(delivery)) {
+      log.warn(
+          "Desfecho da entrega {} descartado: a posse venceu e outro worker reivindicou (lease {} menor que o pior caso de uma tentativa?)",
+          delivery.id(),
+          lease);
+    }
   }
 
   /**
