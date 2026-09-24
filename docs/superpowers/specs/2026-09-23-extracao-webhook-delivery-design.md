@@ -44,7 +44,7 @@ Maven.
 | `client/*` | `client/*` | `HmacSigner`, `HttpWebhookClient`, `WebhookClient`, records |
 | `config/WebhookProperties`, `WorkerPoolConfig` | `config/*` | prefixo novo, §3.3 |
 | `db/migration/V001–V008` | `db/migration/webhook-delivery/V1__*` | consolidadas numa migração inicial, §3.4 |
-| testes: `WebhookDeliveryIntegrationTest`, `DeliveryOrderingIntegrationTest`, `DeliveryClaimExclusionIntegrationTest`, `WebhookLoadTest`, `HmacSignerTest`, `DeliveryPartitionKeyTest`, `LayeredArchitectureTest` | `src/test` da lib | |
+| testes: `WebhookDeliveryIntegrationTest` (reescrito sobre `DeliveryRequest`, sem Kafka), `DeliveryOrderingIntegrationTest`, `DeliveryClaimExclusionIntegrationTest`, `HmacSignerTest`, `DeliveryPartitionKeyTest`, `LayeredArchitectureTest` | `src/test` da lib | `WebhookLoadTest` fica no Barrier: mede Kafka → listener → POST |
 
 **Fica no Barrier** (`services/webhook-api` continua um deployable):
 `AssessmentCompletedListener` (Kafka), `DeliveryReconciliationJob` (relê o
@@ -107,7 +107,7 @@ public record IntakeResult(int deliveriesCreated, int endpointsMatched) {}
 
 - Prefixo `webhook-delivery.*`: `workers`, `lease`, `retry-delay-ms`,
   `max-attempts`, `base-backoff`, `connect-timeout`, `read-timeout`,
-  `secret-rotation-overlap`, `headers.prefix`, `schema`,
+  `secret-rotation-overlap`, `headers.prefix`, `flyway.baseline-on-migrate`,
   `correlation-mdc-key`, `scheduler.enabled`.
 - Headers: `${headers.prefix}-Signature`, `-Signature-Previous`, `-Event-Id`,
   e **novo** `-Event-Type`. Barrier configura `X-Barrier`; gateway,
@@ -121,7 +121,7 @@ public record IntakeResult(int deliveriesCreated, int endpointsMatched) {}
 
 ### 3.4 Schema e Flyway próprios
 
-- A lib é dona do schema `webhook_delivery` (configurável) e de um histórico
+- A lib é dona do schema `webhook_delivery` (fixo: as entidades JPA o declaram em `@Table`, e uma consulta JPQL que muda de schema por propriedade é o bug de `search_path` que o Barrier já pagou) e de um histórico
   Flyway separado: `flyway_schema_history_webhook_delivery`, migrations em
   `classpath:db/migration/webhook-delivery`. Bean `Flyway` próprio, executado
   na subida antes do JPA validar.
