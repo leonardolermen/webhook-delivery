@@ -18,6 +18,16 @@
     <name>webhook-delivery</name>
     <description>Entrega de webhooks assinados com retry, ordenação por chave, idempotência e rotação de segredo</description>
 
+    <scm>
+        <url>https://github.com/leonardolermen/webhook-delivery</url>
+    </scm>
+    <distributionManagement>
+        <repository>
+            <id>github-webhook-delivery</id>
+            <url>https://maven.pkg.github.com/leonardolermen/webhook-delivery</url>
+        </repository>
+    </distributionManagement>
+
     <properties>
         <java.version>25</java.version>
         <archunit.version>1.5.0</archunit.version>

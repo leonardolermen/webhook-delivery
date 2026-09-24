@@ -1,0 +1,66 @@
+# webhook-delivery
+
+Entrega de webhooks assinados a endpoints de clientes: retry com backoff, ordenação por chave,
+idempotência por (evento, endpoint), rotação de segredo com janela. Extraída do Barrier
+(`services/webhook-api`); a história de cada decisão está nos comentários do código e em
+`docs/superpowers/specs/`.
+
+## Uso
+
+```xml
+<dependency>
+  <groupId>com.barrier</groupId>
+  <artifactId>webhook-delivery</artifactId>
+  <version>0.1.0</version>
+</dependency>
+```
+
+GitHub Packages exige token até para ler. Em `~/.m2/settings.xml`:
+
+```xml
+<servers><server><id>github-webhook-delivery</id><username>SEU_USUARIO</username><password>TOKEN_COM_read:packages</password></server></servers>
+```
+e no `pom.xml` do consumidor:
+```xml
+<repositories><repository><id>github-webhook-delivery</id><url>https://maven.pkg.github.com/leonardolermen/webhook-delivery</url></repository></repositories>
+```
+
+No consumidor: `@EnableScheduling` na aplicação (o retry é `@Scheduled`); se você declara
+`@EntityScan`/`@EnableJpaRepositories`, inclua `com.barrier.webhookdelivery.repository`.
+
+```java
+@Autowired DeliveryIntake intake;
+intake.accept(new DeliveryRequest(tenantId, "payment.completed", eventId, "pay_1", "pay_1", json, correlationId));
+```
+
+## Propriedades (`webhook-delivery.*`)
+
+| propriedade | default | o quê |
+|---|---|---|
+| `workers` | 3 | entregas simultâneas (teto real; cabe no pool de conexões) |
+| `lease` | PT2M | posse de uma entrega por um worker; maior que connect+read timeout |
+| `retry-delay-ms` | 5000 | intervalo do scheduler |
+| `max-attempts` | 5 | depois disso a entrega vira `DEAD` |
+| `base-backoff` | PT30S | backoff exponencial, teto 64x |
+| `connect-timeout` / `read-timeout` | PT2S / PT10S | |
+| `secret-rotation-overlap` | PT24H | janela em que o segredo anterior ainda assina |
+| `headers.prefix` | `X-Webhook` | `-Signature`, `-Signature-Previous`, `-Event-Id`, `-Event-Type` |
+| `correlation-mdc-key` | `correlationId` | |
+| `scheduler.enabled` | true | |
+| `flyway.baseline-on-migrate` / `flyway.baseline-version` | false / 1 | para schema pré-existente |
+
+## Assinatura
+
+`<prefix>-Signature: t=<epoch-segundos>,v1=<hex HMAC-SHA256(secret, t + "." + body)>`.
+Verifique com o `t=` do header, rejeite se for velho demais. Durante rotação, `-Signature-Previous`
+traz a assinatura pelo segredo anterior.
+
+## Persistência
+
+Schema `webhook_delivery`, histórico Flyway `flyway_schema_history_webhook_delivery`, migrations
+próprias. Consumidor com schema já existente (Barrier): mova as tabelas e use
+`flyway.baseline-on-migrate=true`.
+
+## Desenvolvimento
+
+`./mvnw verify` (Testcontainers; precisa de Docker). Publicação: tag `vX.Y.Z` no `main`.

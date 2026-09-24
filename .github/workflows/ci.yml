@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { java-version: "25", distribution: corretto, cache: maven }
+      # Unidade + integração (Testcontainers; o runner tem Docker) + arquitetura.
+      - run: ./mvnw -B verify
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: surefire-reports, path: "**/target/surefire-reports/**", retention-days: 7 }
+
+  publish:
+    # Só tag vX.Y.Z: a versão do pom tem de ser a da tag, sem -SNAPSHOT. O job falha se não bater,
+    # de propósito — publicar 0.1.0-SNAPSHOT sob a tag v0.1.0 é o erro que ninguém percebe até o
+    # consumidor resolver a dependência errada.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "25"
+          distribution: corretto
+          cache: maven
+          server-id: github-webhook-delivery
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+      - name: versao do pom == tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          POM=$(./mvnw -q help:evaluate -Dexpression=project.version -DforceStdout)
+          test "$TAG" = "$POM" || { echo "pom=$POM tag=$TAG"; exit 1; }
+      - run: ./mvnw -B -DskipTests deploy
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
