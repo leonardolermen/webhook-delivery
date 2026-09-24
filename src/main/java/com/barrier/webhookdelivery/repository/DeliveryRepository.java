@@ -12,6 +12,14 @@ public interface DeliveryRepository {
 
   Delivery save(Delivery delivery);
 
+  /**
+   * Insere a entrega se ainda não existe uma para o mesmo {@code (eventId, endpointId)}.
+   *
+   * @return {@code true} se inseriu, {@code false} se já existia — sem exceção nos dois casos, e
+   *     sem marcar para rollback a transação de quem chamou
+   */
+  boolean saveIfAbsent(Delivery delivery);
+
   boolean existsByEventId(UUID eventId);
 
   Optional<Delivery> findById(UUID id);

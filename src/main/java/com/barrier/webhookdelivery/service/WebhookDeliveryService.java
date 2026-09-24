@@ -23,7 +23,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
@@ -88,11 +87,11 @@ public class WebhookDeliveryService implements DeliveryIntake {
     }
     int criadas = 0;
     for (WebhookEndpoint endpoint : inscritos) {
-      try {
-        repository.save(Delivery.create(request.eventId(), endpoint.id(), request.eventType(), request.aggregateId(),
-            request.tenantId(), endpoint.targetUrl(), request.payload(), request.partitionKey()));
+      boolean criada = repository.saveIfAbsent(Delivery.create(request.eventId(), endpoint.id(), request.eventType(),
+          request.aggregateId(), request.tenantId(), endpoint.targetUrl(), request.payload(), request.partitionKey()));
+      if (criada) {
         criadas++;
-      } catch (DataIntegrityViolationException e) {
+      } else {
         // (event_id, endpoint_id) já existe: repetição de quem chama, ou corrida entre réplicas.
         log.debug("Entrega do evento {} para o endpoint {} já registrada; ignorando", request.eventId(), endpoint.id());
       }

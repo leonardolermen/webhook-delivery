@@ -2,6 +2,8 @@ package com.barrier.webhookdelivery.repository;
 
 import com.barrier.webhookdelivery.domain.Delivery;
 import com.barrier.webhookdelivery.domain.DeliveryStatus;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
@@ -11,6 +13,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 // @Repository mantido apesar de o bean ser registrado por @Import na autoconfig, e não por
@@ -29,6 +32,8 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
 
   private final DeliveryJpaRepository jpa;
 
+  @PersistenceContext private EntityManager em;
+
   public DeliveryRepositoryImpl(DeliveryJpaRepository jpa) {
     this.jpa = jpa;
   }
@@ -36,6 +41,57 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
   @Override
   public Delivery save(Delivery delivery) {
     return DeliveryEntityMapper.toDomain(jpa.save(DeliveryEntityMapper.toEntity(delivery)));
+  }
+
+  /**
+   * {@code ON CONFLICT DO NOTHING} e não {@code save} + {@code catch (DataIntegrityViolationException)}:
+   * o catch só funcionava porque cada {@code save} commitava sozinho. Dentro do
+   * {@code @Transactional} de quem chama, o INSERT fica para o flush, a violação estoura fora do
+   * try, e no Postgres a transação inteira de quem chamou é abortada por uma duplicata que devia ser
+   * um no-op.
+   *
+   * <p>SQL nativo é seguro aqui, ao contrário do caso descrito em
+   * {@code DeliveryJpaRepository.selectClaimable}: a tabela vai qualificada com o schema, que é
+   * fixo ({@code webhook_delivery}), então o {@code search_path} da conexão não muda o alvo.
+   *
+   * <p>{@code @Transactional} (REQUIRED) porque {@code executeUpdate} exige transação: entra na de
+   * quem chama quando existe, e abre uma curta quando não.
+   */
+  @Override
+  @Transactional
+  public boolean saveIfAbsent(Delivery delivery) {
+    DeliveryEntity e = DeliveryEntityMapper.toEntity(delivery);
+    int inseridas =
+        em.createNativeQuery(
+                """
+                INSERT INTO webhook_delivery.deliveries
+                  (id, event_id, endpoint_id, event_type, aggregate_id, tenant_id, target_url, payload,
+                   partition_key, status, attempts, last_error, next_attempt_at, claimed_at, created_at,
+                   delivered_at)
+                VALUES
+                  (:id, :eventId, :endpointId, :eventType, :aggregateId, :tenantId, :targetUrl, :payload,
+                   :partitionKey, :status, :attempts, :lastError, :nextAttemptAt, :claimedAt, :createdAt,
+                   :deliveredAt)
+                ON CONFLICT (event_id, endpoint_id) DO NOTHING
+                """)
+            .setParameter("id", e.getId())
+            .setParameter("eventId", e.getEventId())
+            .setParameter("endpointId", e.getEndpointId())
+            .setParameter("eventType", e.getEventType())
+            .setParameter("aggregateId", e.getAggregateId())
+            .setParameter("tenantId", e.getTenantId())
+            .setParameter("targetUrl", e.getTargetUrl())
+            .setParameter("payload", e.getPayload())
+            .setParameter("partitionKey", e.getPartitionKey())
+            .setParameter("status", e.getStatus().name())
+            .setParameter("attempts", e.getAttempts())
+            .setParameter("lastError", e.getLastError())
+            .setParameter("nextAttemptAt", e.getNextAttemptAt())
+            .setParameter("claimedAt", e.getClaimedAt())
+            .setParameter("createdAt", e.getCreatedAt())
+            .setParameter("deliveredAt", e.getDeliveredAt())
+            .executeUpdate();
+    return inseridas == 1;
   }
 
   @Override

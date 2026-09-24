@@ -24,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -68,6 +69,7 @@ class WebhookDeliveryIntegrationTest {
   @Autowired WebhookEndpointService endpoints;
   @Autowired HmacSigner signer;
   @Autowired JdbcTemplate jdbc;
+  @Autowired TransactionTemplate tx;
 
   @BeforeEach
   void limpa() {
@@ -133,5 +135,46 @@ class WebhookDeliveryIntegrationTest {
     Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
         assertThat(jdbc.queryForObject("SELECT status FROM webhook_delivery.deliveries", String.class)).isEqualTo("DEAD"));
     assertThat(porCaminho).doesNotContainKey("/a");
+  }
+
+  /**
+   * Duas réplicas recebendo o mesmo evento ao mesmo tempo: o total criado é um por endpoint, e
+   * nenhuma das duas chamadas estoura com a duplicata da outra.
+   */
+  @Test
+  void aceitesConcorrentesDoMesmoEventoCriamUmaEntregaPorEndpoint() throws Exception {
+    endpoints.register("t1", url("/a"), List.of());
+    endpoints.register("t1", url("/b"), List.of());
+    DeliveryRequest req = new DeliveryRequest("t1", "payment.completed", UUID.randomUUID(), "pay_c", "pay_c", "{}", "corr-c");
+    var largada = new java.util.concurrent.CountDownLatch(1);
+    try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+      var f1 = pool.submit(() -> { largada.await(); return intake.accept(req); });
+      var f2 = pool.submit(() -> { largada.await(); return intake.accept(req); });
+      largada.countDown();
+      IntakeResult r1 = f1.get(30, java.util.concurrent.TimeUnit.SECONDS);
+      IntakeResult r2 = f2.get(30, java.util.concurrent.TimeUnit.SECONDS);
+      assertThat(r1.deliveriesCreated() + r2.deliveriesCreated()).isEqualTo(2);
+    }
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM webhook_delivery.deliveries WHERE event_id = ?",
+        Integer.class, req.eventId())).isEqualTo(2);
+  }
+
+  /**
+   * Dentro da transação de quem chama: a segunda aceitação do mesmo evento é um no-op, e a
+   * transação commita. Com o antigo save + catch, o INSERT duplicado abortava a transação inteira.
+   */
+  @Test
+  void aceitarDuasVezesDentroDaTransacaoDeQuemChamaNaoAbortaATransacao() {
+    endpoints.register("t1", url("/a"), List.of());
+    DeliveryRequest req = new DeliveryRequest("t1", "payment.completed", UUID.randomUUID(), "pay_t", "pay_t", "{}", "corr-t");
+
+    IntakeResult segunda = tx.execute(status -> {
+      intake.accept(req);
+      return intake.accept(req);
+    });
+
+    assertThat(segunda.deliveriesCreated()).isZero();
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM webhook_delivery.deliveries WHERE event_id = ?",
+        Integer.class, req.eventId())).isEqualTo(1);
   }
 }
