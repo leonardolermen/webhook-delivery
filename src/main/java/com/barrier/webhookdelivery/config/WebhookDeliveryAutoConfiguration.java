@@ -29,8 +29,14 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <p>{@link AutoConfigurationPackage} registra {@code com.barrier.webhookdelivery.repository} para o
  * scan de entidades e de repositórios Spring Data do Boot. Consumidor que declara o próprio
  * {@code @EntityScan}/{@code @EnableJpaRepositories} precisa incluir esse pacote — está no README.
+ *
+ * <p>{@code afterName} e não {@code after = FlywayAutoConfiguration.class}: a lib não depende de
+ * {@code spring-boot-flyway}, e a referência por string é ignorada quando o módulo não está no
+ * classpath. Com ele presente, o Flyway do consumidor é registrado antes — o que, junto com o
+ * {@code dependsOn("flywayInitializer")} de {@link WebhookDeliveryFlywayConfiguration}, garante que
+ * as migrations do consumidor rodam antes das da lib.
  */
-@AutoConfiguration
+@AutoConfiguration(afterName = "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration")
 @AutoConfigurationPackage(basePackages = "com.barrier.webhookdelivery.repository")
 @EnableConfigurationProperties(WebhookDeliveryProperties.class)
 @Import({
@@ -44,11 +50,15 @@ public class WebhookDeliveryAutoConfiguration {
   public WebhookClient webhookClient(WebhookDeliveryProperties properties) { return new HttpWebhookClient(properties); }
 
   @Bean
+  @ConditionalOnMissingBean
   public HmacSigner hmacSigner() { return new HmacSigner(); }
 
-  @Bean public WebhookEndpointService webhookEndpointService(WebhookEndpointRepository r, WebhookDeliveryProperties p) { return new WebhookEndpointService(r, p); }
+  @Bean
+  @ConditionalOnMissingBean
+  public WebhookEndpointService webhookEndpointService(WebhookEndpointRepository r, WebhookDeliveryProperties p) { return new WebhookEndpointService(r, p); }
 
   @Bean
+  @ConditionalOnMissingBean
   public WebhookDeliveryService webhookDeliveryService(DeliveryRepository r, WebhookEndpointService e, WebhookClient c, HmacSigner s,
       WebhookDeliveryProperties p, PlatformTransactionManager tm) {
     return new WebhookDeliveryService(r, e, c, s, p, new TransactionTemplate(tm));
