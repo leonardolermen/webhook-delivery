@@ -1,10 +1,15 @@
 package com.barrier.webhookdelivery.config;
 
+import com.barrier.webhookdelivery.client.HttpWebhookClient;
+import com.barrier.webhookdelivery.client.WebhookClient;
+import com.barrier.webhookdelivery.client.HmacSigner;
 import com.barrier.webhookdelivery.repository.DeliveryRepositoryImpl;
 import com.barrier.webhookdelivery.repository.WebhookEndpointRepositoryImpl;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigurationPackage;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 
 /**
@@ -25,4 +30,11 @@ import org.springframework.context.annotation.Import;
   DeliveryRepositoryImpl.class,
   WebhookEndpointRepositoryImpl.class
 })
-public class WebhookDeliveryAutoConfiguration {}
+public class WebhookDeliveryAutoConfiguration {
+  @Bean
+  @ConditionalOnMissingBean(WebhookClient.class)
+  public WebhookClient webhookClient(WebhookDeliveryProperties properties) { return new HttpWebhookClient(properties); }
+
+  @Bean
+  public HmacSigner hmacSigner() { return new HmacSigner(); }
+}
