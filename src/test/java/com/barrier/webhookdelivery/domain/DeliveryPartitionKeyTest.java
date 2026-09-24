@@ -8,9 +8,10 @@ import org.junit.jupiter.api.Test;
 /**
  * A entrega precisa carregar a chave que decide o que pode correr em paralelo com o quê.
  *
- * <p>A chave é o subject, não o tenant nem o assessment: serializar por tenant limitaria o parceiro
- * grande a uma entrega por vez, e por assessment não ordenaria nada — a decisão e a mudança de nível
- * de risco do mesmo cliente têm assessments diferentes.
+ * <p>A chave é escolhida por quem chama, e não é o tenant nem o agregado: serializar por tenant
+ * limitaria o parceiro grande a uma entrega por vez, e por agregado não ordenaria nada quando dois
+ * eventos sobre a mesma entidade de negócio nascem de agregados diferentes (no Barrier, a decisão e
+ * a mudança de nível de risco do mesmo cliente — por isso lá a chave é o subject).
  */
 class DeliveryPartitionKeyTest {
 

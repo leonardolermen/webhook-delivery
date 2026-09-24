@@ -55,7 +55,7 @@ interface DeliveryJpaRepository extends JpaRepository<DeliveryEntity, UUID> {
   /**
    * Entregas vencidas cuja posse está livre ou expirada, travadas para reivindicação exclusiva.
    *
-   * <p>JPQL e não SQL nativo de propósito: a tabela vive no schema {@code webhook} e o
+   * <p>JPQL e não SQL nativo de propósito: a tabela vive no schema {@code webhook_delivery} e o
    * {@code hibernate.default_schema} não se aplica a consultas nativas — uma delas quebraria em
    * runtime dependendo do {@code search_path} da conexão.
    *

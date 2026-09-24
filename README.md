@@ -28,6 +28,14 @@ e no `pom.xml` do consumidor:
 No consumidor: `@EnableScheduling` na aplicação (o retry é `@Scheduled`); se você declara
 `@EntityScan`/`@EnableJpaRepositories`, inclua `com.barrier.webhookdelivery.repository`.
 
+A autoconfiguração registra `com.barrier.webhookdelivery.repository` para o scan de entidades e
+repositórios Spring Data. Aplicação cujo `@SpringBootApplication` está num pacote **ancestral** do da
+lib (ex.: `com.barrier`) já escaneia esse pacote pelo próprio auto-configuration package, e os dois
+registros colidem (`BeanDefinitionOverrideException` em `DeliveryJpaRepository`). Nesse caso, mova a
+classe da aplicação para um subpacote (ex.: `com.barrier.meuservico`) ou declare
+`@EnableJpaRepositories`/`@EntityScan` restritos aos seus pacotes mais
+`com.barrier.webhookdelivery.repository`.
+
 ```java
 @Autowired DeliveryIntake intake;
 intake.accept(new DeliveryRequest(tenantId, "payment.completed", eventId, "pay_1", "pay_1", json, correlationId));
@@ -52,13 +60,17 @@ intake.accept(new DeliveryRequest(tenantId, "payment.completed", eventId, "pay_1
 ## Assinatura
 
 `<prefix>-Signature: t=<epoch-segundos>,v1=<hex HMAC-SHA256(secret, t + "." + body)>`.
-Verifique com o `t=` do header, rejeite se for velho demais. Durante rotação, `-Signature-Previous`
+Verifique com o `t=` do header, rejeite se for velho demais — recomendamos uma janela de tolerância
+de 5 minutos, que cobre desvio de relógio e rejeita replay. Durante rotação, `-Signature-Previous`
 traz a assinatura pelo segredo anterior.
 
 ## Persistência
 
 Schema `webhook_delivery`, histórico Flyway `flyway_schema_history_webhook_delivery`, migrations
-próprias. Consumidor com schema já existente (Barrier): mova as tabelas e use
+próprias em `classpath:db/webhook-delivery` (fora de `db/migration`, que o Flyway do consumidor varre
+recursivamente). A lib traz o próprio Flyway e **convive** com o do consumidor: ela não expõe bean
+`Flyway` (o do Boot continua rodando o `db/migration` do consumidor) e roda **depois** dele quando ele
+existe. Consumidor com schema já existente (Barrier): mova as tabelas numa migration sua e use
 `flyway.baseline-on-migrate=true`.
 
 ## Desenvolvimento

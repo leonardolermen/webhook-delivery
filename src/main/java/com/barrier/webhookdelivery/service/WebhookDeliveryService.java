@@ -31,7 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <p>Idempotência por {@code (eventId, endpointId)}. A entrega é assinada com HMAC; falhas
  * reagendam com backoff exponencial até esgotar as tentativas.
  */
-public class WebhookDeliveryService implements DeliveryIntake {
+public class WebhookDeliveryService implements DeliveryIntake, AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(WebhookDeliveryService.class);
   private static final int RETRY_BATCH = 100;
@@ -183,6 +183,16 @@ public class WebhookDeliveryService implements DeliveryIntake {
           result.detail());
     }
     repository.save(delivery);
+  }
+
+  /**
+   * Encerra o executor das entregas quando o contexto fecha (o Spring chama {@code close()} de bean
+   * {@link AutoCloseable} sem configuração). Não espera o lote em voo: numa parada abrupta a posse
+   * (lease) já cobre a entrega interrompida — ela volta a ser reivindicável quando o lease vence.
+   */
+  @Override
+  public void close() {
+    entregas.shutdownNow();
   }
 
   private Instant nextAttempt(int attempts) {
