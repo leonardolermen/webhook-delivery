@@ -4,6 +4,7 @@ import com.barrier.webhookdelivery.domain.DeliveryStatus;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -17,6 +18,31 @@ import jakarta.persistence.QueryHint;
 interface DeliveryJpaRepository extends JpaRepository<DeliveryEntity, UUID> {
 
   boolean existsByEventId(UUID eventId);
+
+  Optional<DeliveryEntity> findByIdAndTenantId(UUID id, String tenantId);
+
+  @Query(
+      """
+      SELECT d FROM DeliveryEntity d
+       WHERE d.tenantId = :tenantId
+         AND (:status IS NULL OR d.status = :status)
+         AND (:eventType IS NULL OR d.eventType = :eventType)
+         AND (:aggregateId IS NULL OR d.aggregateId = :aggregateId)
+         AND (CAST(:since AS timestamp) IS NULL OR d.createdAt >= :since)
+         AND (CAST(:cursorCreatedAt AS timestamp) IS NULL
+              OR d.createdAt < :cursorCreatedAt
+              OR (d.createdAt = :cursorCreatedAt AND d.id < :cursorId))
+       ORDER BY d.createdAt DESC, d.id DESC
+      """)
+  List<DeliveryEntity> listByTenant(
+      @Param("tenantId") String tenantId,
+      @Param("status") DeliveryStatus status,
+      @Param("eventType") String eventType,
+      @Param("aggregateId") String aggregateId,
+      @Param("since") Instant since,
+      @Param("cursorCreatedAt") Instant cursorCreatedAt,
+      @Param("cursorId") UUID cursorId,
+      Limit limit);
 
   /**
    * Desfecho condicionado à posse: só grava se {@code claim_token} ainda é o da reivindicação

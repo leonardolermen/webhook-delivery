@@ -1,6 +1,7 @@
 package com.barrier.webhookdelivery.repository;
 
 import com.barrier.webhookdelivery.domain.Delivery;
+import com.barrier.webhookdelivery.domain.DeliveryQuery;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -30,6 +31,12 @@ public interface DeliveryRepository {
   boolean existsByEventId(UUID eventId);
 
   Optional<Delivery> findById(UUID id);
+
+  /** Listagem do merchant: created_at DESC, id DESC, com cursor nos dois campos (índice V3). */
+  List<Delivery> findByTenant(String tenantId, DeliveryQuery query);
+
+  /** Pelo tenant junto, para a borda nunca precisar checar posse depois de ler. */
+  Optional<Delivery> findByTenantAndId(String tenantId, UUID id);
 
   /**
    * Reivindica entregas prontas para (re)tentativa — PENDING ou FAILED com {@code nextAttemptAt}

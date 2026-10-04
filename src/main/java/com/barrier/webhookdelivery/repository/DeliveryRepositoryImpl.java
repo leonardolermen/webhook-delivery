@@ -1,6 +1,8 @@
 package com.barrier.webhookdelivery.repository;
 
 import com.barrier.webhookdelivery.domain.Delivery;
+import com.barrier.webhookdelivery.domain.DeliveryCursor;
+import com.barrier.webhookdelivery.domain.DeliveryQuery;
 import com.barrier.webhookdelivery.domain.DeliveryStatus;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -86,11 +88,11 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
                 INSERT INTO webhook_delivery.deliveries
                   (id, event_id, endpoint_id, event_type, aggregate_id, tenant_id, target_url, payload,
                    partition_key, status, attempts, last_error, next_attempt_at, claimed_at, claim_token,
-                   created_at, delivered_at)
+                   created_at, delivered_at, redelivered_at, last_error_before_redelivery)
                 VALUES
                   (:id, :eventId, :endpointId, :eventType, :aggregateId, :tenantId, :targetUrl, :payload,
                    :partitionKey, :status, :attempts, :lastError, :nextAttemptAt, :claimedAt, :claimToken,
-                   :createdAt, :deliveredAt)
+                   :createdAt, :deliveredAt, :redeliveredAt, :lastErrorBeforeRedelivery)
                 ON CONFLICT (event_id, endpoint_id) DO NOTHING
                 """)
             .setParameter("id", e.getId())
@@ -110,6 +112,8 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
             .setParameter("claimToken", e.getClaimToken())
             .setParameter("createdAt", e.getCreatedAt())
             .setParameter("deliveredAt", e.getDeliveredAt())
+            .setParameter("redeliveredAt", e.getRedeliveredAt())
+            .setParameter("lastErrorBeforeRedelivery", e.getLastErrorBeforeRedelivery())
             .executeUpdate();
     return inseridas == 1;
   }
@@ -122,6 +126,29 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
   @Override
   public Optional<Delivery> findById(UUID id) {
     return jpa.findById(id).map(DeliveryEntityMapper::toDomain);
+  }
+
+  @Override
+  public List<Delivery> findByTenant(String tenantId, DeliveryQuery query) {
+    DeliveryCursor cursor = query.after();
+    return jpa
+        .listByTenant(
+            tenantId,
+            query.status(),
+            query.eventType(),
+            query.aggregateId(),
+            query.since(),
+            cursor == null ? null : cursor.createdAt(),
+            cursor == null ? null : cursor.id(),
+            Limit.of(query.limit()))
+        .stream()
+        .map(DeliveryEntityMapper::toDomain)
+        .toList();
+  }
+
+  @Override
+  public Optional<Delivery> findByTenantAndId(String tenantId, UUID id) {
+    return jpa.findByIdAndTenantId(id, tenantId).map(DeliveryEntityMapper::toDomain);
   }
 
   /**
