@@ -213,6 +213,27 @@ public class Delivery {
     this.nextAttemptAt = null;
   }
 
+  /**
+   * Reentrega manual: só DEAD ou FAILED. PENDING está em voo ou na fila; DELIVERED já chegou e o
+   * merchant que quer o payload de novo lê a entrega, não a reenvia. A assinatura na próxima
+   * tentativa usa o segredo vigente do endpoint, nunca o da época (decisão do plano).
+   */
+  public void redeliver(Instant now) {
+    if (status != DeliveryStatus.DEAD && status != DeliveryStatus.FAILED) {
+      throw new IllegalStateException(
+          "entrega " + id + " está " + status + "; só DEAD ou FAILED reentregam");
+    }
+
+    this.lastErrorBeforeRedelivery = lastError;
+    this.lastError = null;
+    this.attempts = 0;
+    this.status = DeliveryStatus.PENDING;
+    this.nextAttemptAt = now;
+    this.claimedAt = null;
+    this.claimToken = null;
+    this.redeliveredAt = now;
+  }
+
   private static String truncate(String error) {
     return error == null || error.length() <= MAX_ERROR_LENGTH ? error : error.substring(0, MAX_ERROR_LENGTH);
   }

@@ -39,6 +39,19 @@ public interface DeliveryRepository {
   Optional<Delivery> findByTenantAndId(String tenantId, UUID id);
 
   /**
+   * Volta a PENDING uma entrega DEAD ou FAILED do tenant, guardando o erro anterior. Condicional:
+   * {@code false} se ela não é do tenant, não está DEAD/FAILED, ou é uma FAILED com posse ativa
+   * (um worker a está tentando agora; {@code lease} define "ativa").
+   */
+  boolean markRedelivered(String tenantId, UUID id, Instant now, Duration lease);
+
+  /**
+   * Reentrega em lote: até {@code max} entregas DEAD do tenant criadas a partir de {@code since},
+   * as mais antigas primeiro. Retorna quantas voltaram a PENDING.
+   */
+  int markDeadRedelivered(String tenantId, Instant since, Instant now, int max);
+
+  /**
    * Reivindica entregas prontas para (re)tentativa — PENDING ou FAILED com {@code nextAttemptAt}
    * vencido — marcando posse por {@code lease}.
    *

@@ -151,6 +151,37 @@ public class DeliveryRepositoryImpl implements DeliveryRepository {
     return jpa.findByIdAndTenantId(id, tenantId).map(DeliveryEntityMapper::toDomain);
   }
 
+  @Override
+  @Transactional
+  public boolean markRedelivered(String tenantId, UUID id, Instant now, Duration lease) {
+    return jpa.marcarReentrega(id, tenantId, now, now.minus(lease)) == 1;
+  }
+
+  /**
+   * SQL nativo pelo {@code LIMIT} na subconsulta, que o JPQL não tem; seguro pelo mesmo motivo de
+   * {@code saveIfAbsent}: a tabela vai qualificada com o schema fixo. Só DEAD, e DEAD não tem posse
+   * ativa (a gravação do desfecho zera a posse), então dispensa a guarda de lease.
+   */
+  @Override
+  @Transactional
+  public int markDeadRedelivered(String tenantId, Instant since, Instant now, int max) {
+    return em.createNativeQuery(
+            """
+            UPDATE webhook_delivery.deliveries
+               SET last_error_before_redelivery = last_error, last_error = NULL, attempts = 0,
+                   status = 'PENDING', next_attempt_at = :now, claimed_at = NULL, claim_token = NULL,
+                   redelivered_at = :now
+             WHERE id IN (SELECT id FROM webhook_delivery.deliveries
+                           WHERE tenant_id = :tenantId AND status = 'DEAD' AND created_at >= :since
+                           ORDER BY created_at LIMIT :max)
+            """)
+        .setParameter("now", now)
+        .setParameter("tenantId", tenantId)
+        .setParameter("since", since)
+        .setParameter("max", max)
+        .executeUpdate();
+  }
+
   /**
    * A posse é gravada por dirty checking: as entidades vêm gerenciadas da consulta com lock, e o
    * {@code claimed_at} é persistido no commit da transação que envolve esta chamada — que é curta e

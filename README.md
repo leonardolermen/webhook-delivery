@@ -11,7 +11,7 @@ idempotência por (evento, endpoint), rotação de segredo com janela. Extraída
 <dependency>
   <groupId>com.barrier</groupId>
   <artifactId>webhook-delivery</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
@@ -65,6 +65,33 @@ intake.accept(new DeliveryRequest(tenantId, "payment.completed", eventId, "pay_1
 Verifique com o `t=` do header, rejeite se for velho demais — recomendamos uma janela de tolerância
 de 5 minutos, que cobre desvio de relógio e rejeita replay. Durante rotação, `-Signature-Previous`
 traz a assinatura pelo segredo anterior.
+
+## Listagem e reentrega
+
+Leitura por tenant, sempre com o tenant junto — a borda nunca lê e depois confere a posse:
+
+- `DeliveryRepository.findByTenant(tenantId, DeliveryQuery)` — `created_at DESC, id DESC`, filtros
+  opcionais (`status`, `eventType`, `aggregateId`, `since`) e cursor `DeliveryCursor(createdAt, id)`;
+  `limit` padrão 20, teto 100.
+- `DeliveryRepository.findByTenantAndId(tenantId, id)` — vazio para id inexistente **ou** de outro
+  tenant.
+
+Reentrega manual, em `WebhookDeliveryService`:
+
+- `redeliver(tenantId, deliveryId)` → `RedeliverResult`: `SCHEDULED`, `NOT_FOUND` (inexistente ou de
+  outro tenant) ou `NOT_REDELIVERABLE`. Só entrega `DEAD` ou `FAILED` reentrega — `PENDING` já está
+  na fila, `DELIVERED` já chegou — e só com o endpoint **ativo**. A escrita é um `UPDATE` condicional
+  que repete a regra; uma `FAILED` que um worker está tentando agora (posse dentro do lease) não é
+  zerada por baixo dele.
+- `redeliverDead(tenantId, since)` → quantas voltaram: as `DEAD` do tenant criadas a partir de
+  `since`, mais antigas primeiro, em lote de no máximo 1000 (`REDELIVER_DEAD_MAX`). Não confere o
+  endpoint linha a linha: a de endpoint desativado volta e morre de novo na primeira tentativa.
+
+A entrega reentregue volta a `PENDING` com `attempts = 0` e vence na hora; o próximo `retryDue()` a
+tenta, respeitando a ordem da chave de partição (uma irmã mais antiga ainda não terminal sai antes).
+A assinatura usa o segredo **vigente** do endpoint, não o da época da entrega original. O erro que a
+matou fica em `last_error_before_redelivery` (`Delivery.lastErrorBeforeRedelivery()`), e o instante
+do pedido em `redelivered_at`.
 
 ## Persistência
 

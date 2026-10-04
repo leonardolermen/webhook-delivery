@@ -45,6 +45,30 @@ interface DeliveryJpaRepository extends JpaRepository<DeliveryEntity, UUID> {
       Limit limit);
 
   /**
+   * Reentrega manual condicional: o WHERE repete a regra de {@code Delivery.redeliver} e é a
+   * guarda de corrida. O {@code leaseCutoff} impede zerar por baixo de um worker uma FAILED que
+   * ele está tentando agora — FAILED com posse ativa está "em voo", a mesma regra do
+   * {@code selectClaimable}.
+   */
+  @Modifying
+  @Query(
+      """
+      UPDATE DeliveryEntity d
+         SET d.lastErrorBeforeRedelivery = d.lastError, d.lastError = NULL, d.attempts = 0,
+             d.status = com.barrier.webhookdelivery.domain.DeliveryStatus.PENDING,
+             d.nextAttemptAt = :now, d.claimedAt = NULL, d.claimToken = NULL, d.redeliveredAt = :now
+       WHERE d.id = :id AND d.tenantId = :tenantId
+         AND d.status IN (com.barrier.webhookdelivery.domain.DeliveryStatus.DEAD,
+                          com.barrier.webhookdelivery.domain.DeliveryStatus.FAILED)
+         AND (d.claimedAt IS NULL OR d.claimedAt < :leaseCutoff)
+      """)
+  int marcarReentrega(
+      @Param("id") UUID id,
+      @Param("tenantId") String tenantId,
+      @Param("now") Instant now,
+      @Param("leaseCutoff") Instant leaseCutoff);
+
+  /**
    * Desfecho condicionado à posse: só grava se {@code claim_token} ainda é o da reivindicação
    * que fez a tentativa, e zera a posse na mesma escrita. Zero linhas afetadas = token vencido,
    * outro worker é o dono agora. JPQL pelo mesmo motivo de {@code selectClaimable}.
