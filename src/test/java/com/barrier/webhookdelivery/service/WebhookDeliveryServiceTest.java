@@ -48,6 +48,10 @@ class WebhookDeliveryServiceTest {
 
     @Override public boolean saveIfAbsent(Delivery d) { dados.add(d); return true; }
     @Override public boolean existsByEventId(UUID eventId) { return dados.stream().anyMatch(d -> d.eventId().equals(eventId)); }
+    @Override public List<Delivery> findByTenant(String tenantId, com.barrier.webhookdelivery.domain.DeliveryQuery query) { throw new UnsupportedOperationException(); }
+    @Override public Optional<Delivery> findByTenantAndId(String tenantId, UUID id) { throw new UnsupportedOperationException(); }
+    @Override public boolean markRedelivered(String tenantId, UUID id, java.time.Instant now, java.time.Duration lease) { throw new UnsupportedOperationException(); }
+    @Override public int markDeadRedelivered(String tenantId, java.time.Instant since, java.time.Instant now, int max) { throw new UnsupportedOperationException(); }
     @Override public Optional<Delivery> findById(UUID id) { return dados.stream().filter(d -> d.id().equals(id)).findFirst(); }
 
     @Override

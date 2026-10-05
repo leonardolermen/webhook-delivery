@@ -6,6 +6,8 @@ import com.barrier.webhookdelivery.client.WebhookRequest;
 import com.barrier.webhookdelivery.client.WebhookSendResult;
 import com.barrier.webhookdelivery.config.WebhookDeliveryProperties;
 import com.barrier.webhookdelivery.domain.Delivery;
+import com.barrier.webhookdelivery.domain.DeliveryStatus;
+import com.barrier.webhookdelivery.domain.RedeliverResult;
 import com.barrier.webhookdelivery.domain.SigningMaterial;
 import com.barrier.webhookdelivery.domain.WebhookEndpoint;
 import com.barrier.webhookdelivery.intake.DeliveryIntake;
@@ -18,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,6 +39,9 @@ public class WebhookDeliveryService implements DeliveryIntake, AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(WebhookDeliveryService.class);
   private static final int RETRY_BATCH = 100;
+
+  /** Teto de uma reentrega em lote: um pedido não vira rajada sem limite sobre o parceiro. */
+  public static final int REDELIVER_DEAD_MAX = 1000;
 
   private final DeliveryRepository repository;
   private final WebhookEndpointService endpoints;
@@ -100,6 +106,40 @@ public class WebhookDeliveryService implements DeliveryIntake, AutoCloseable {
     // A entrega NÃO acontece aqui, de propósito — ver o comentário original: quem entrega é o
     // retryDue(), pelo pool, fora da thread de quem chamou.
     return new IntakeResult(inscritos.size(), criadas);
+  }
+
+  /**
+   * Reentrega manual de uma entrega do tenant. Lê, decide, escreve condicional: a regra é a de
+   * {@link Delivery#redeliver}, e o WHERE do UPDATE a repete como guarda de corrida.
+   */
+  public RedeliverResult redeliver(String tenantId, UUID deliveryId) {
+    Optional<Delivery> found = repository.findByTenantAndId(tenantId, deliveryId);
+    if (found.isEmpty()) {
+      return RedeliverResult.NOT_FOUND;
+    }
+
+    Delivery delivery = found.get();
+    if (delivery.status() != DeliveryStatus.DEAD && delivery.status() != DeliveryStatus.FAILED) {
+      return RedeliverResult.NOT_REDELIVERABLE;
+    }
+    if (endpoints.resolveSigningMaterial(delivery.endpointId()).isEmpty()) {
+      return RedeliverResult.NOT_REDELIVERABLE; // endpoint desativado: a tentativa morreria de novo
+    }
+
+    boolean marcada = repository.markRedelivered(tenantId, deliveryId, Instant.now(), lease);
+
+    return marcada ? RedeliverResult.SCHEDULED : RedeliverResult.NOT_REDELIVERABLE;
+  }
+
+  /**
+   * Reentrega em lote das DEAD do tenant desde {@code since}, até {@link #REDELIVER_DEAD_MAX}.
+   *
+   * <p>Não confere o endpoint linha a linha: uma morta de endpoint desativado volta e morre de novo
+   * na primeira tentativa com "endpoint desativado ou removido" — o desfecho honesto que já existe,
+   * sem uma consulta por linha para antecipá-lo.
+   */
+  public int redeliverDead(String tenantId, Instant since) {
+    return repository.markDeadRedelivered(tenantId, since, Instant.now(), REDELIVER_DEAD_MAX);
   }
 
   /**

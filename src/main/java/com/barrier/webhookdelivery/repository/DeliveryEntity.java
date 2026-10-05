@@ -78,4 +78,10 @@ class DeliveryEntity {
   @Column(name = "delivered_at")
   private Instant deliveredAt;
 
+  @Column(name = "redelivered_at")
+  private Instant redeliveredAt;
+
+  @Column(name = "last_error_before_redelivery", length = 500)
+  private String lastErrorBeforeRedelivery;
+
 }

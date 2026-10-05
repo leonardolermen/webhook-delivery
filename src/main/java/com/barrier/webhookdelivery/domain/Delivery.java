@@ -54,6 +54,12 @@ public class Delivery {
   private final Instant createdAt;
   private Instant deliveredAt;
 
+  /** Quando a reentrega manual foi pedida; {@code null} se nunca foi. */
+  private Instant redeliveredAt;
+
+  /** O {@code lastError} da entrega ao voltar a PENDING; a próxima tentativa o sobrescreve. */
+  private String lastErrorBeforeRedelivery;
+
   private Delivery(
       UUID id,
       UUID eventId,
@@ -132,7 +138,9 @@ public class Delivery {
       Instant claimedAt,
       UUID claimToken,
       Instant createdAt,
-      Instant deliveredAt) {
+      Instant deliveredAt,
+      Instant redeliveredAt,
+      String lastErrorBeforeRedelivery) {
     Delivery d =
         new Delivery(
             id,
@@ -152,6 +160,8 @@ public class Delivery {
     d.claimedAt = claimedAt;
     d.claimToken = claimToken;
     d.deliveredAt = deliveredAt;
+    d.redeliveredAt = redeliveredAt;
+    d.lastErrorBeforeRedelivery = lastErrorBeforeRedelivery;
     return d;
   }
 
@@ -201,6 +211,27 @@ public class Delivery {
     this.lastError = truncate(error);
     this.claimedAt = null;
     this.nextAttemptAt = null;
+  }
+
+  /**
+   * Reentrega manual: só DEAD ou FAILED. PENDING está em voo ou na fila; DELIVERED já chegou e o
+   * merchant que quer o payload de novo lê a entrega, não a reenvia. A assinatura na próxima
+   * tentativa usa o segredo vigente do endpoint, nunca o da época (decisão do plano).
+   */
+  public void redeliver(Instant now) {
+    if (status != DeliveryStatus.DEAD && status != DeliveryStatus.FAILED) {
+      throw new IllegalStateException(
+          "entrega " + id + " está " + status + "; só DEAD ou FAILED reentregam");
+    }
+
+    this.lastErrorBeforeRedelivery = lastError;
+    this.lastError = null;
+    this.attempts = 0;
+    this.status = DeliveryStatus.PENDING;
+    this.nextAttemptAt = now;
+    this.claimedAt = null;
+    this.claimToken = null;
+    this.redeliveredAt = now;
   }
 
   private static String truncate(String error) {
@@ -273,5 +304,13 @@ public class Delivery {
 
   public Instant deliveredAt() {
     return deliveredAt;
+  }
+
+  public Instant redeliveredAt() {
+    return redeliveredAt;
+  }
+
+  public String lastErrorBeforeRedelivery() {
+    return lastErrorBeforeRedelivery;
   }
 }

@@ -25,6 +25,8 @@ final class DeliveryEntityMapper {
     e.setClaimToken(d.claimToken());
     e.setCreatedAt(d.createdAt());
     e.setDeliveredAt(d.deliveredAt());
+    e.setRedeliveredAt(d.redeliveredAt());
+    e.setLastErrorBeforeRedelivery(d.lastErrorBeforeRedelivery());
     return e;
   }
 
@@ -46,6 +48,8 @@ final class DeliveryEntityMapper {
         e.getClaimedAt(),
         e.getClaimToken(),
         e.getCreatedAt(),
-        e.getDeliveredAt());
+        e.getDeliveredAt(),
+        e.getRedeliveredAt(),
+        e.getLastErrorBeforeRedelivery());
   }
 }
